@@ -1,0 +1,33 @@
+# libFuzzer target over PudData::Parse (pud.cpp) — the .pud map deserializer both wargus targets
+# share. Ported unchanged from the retired mayhemheroes/wargus integration (same target name
+# `parse`, same `max_length: 105` cap matching the harness's 100-byte ConsumeData() read plus a
+# little slack), now built against the base image's sanitizer/DWARF contract by mayhem/build.sh
+# instead of the old Dockerfile's bespoke `clang++ ... -fsanitize=fuzzer,address`.
+project: savantenvs/wargus
+target: parse
+
+cmds:
+  - cmd: /mayhem/fuzz_Parse
+    libfuzzer: true
+    max_length: 105
+
+# Canonical two-entry form: server-accumulated corpus + the per-target local seeds:
+#   seed1           a 105-byte prefix of the repo's one shipped .pud map,
+#                   maps/skirmish/multiplayer/(8)farscape2006.pud (its real "TYPE"/"WAR2 MAP"
+#                   header). It crashes the unmodified parser (the truncated map runs off the end
+#                   of the 100-byte buffer).
+#   section-*       19 seeds of exactly 100 bytes: TYPE + one section kind (after a DIM for the
+#                   per-tile sections) + SIGN padding, each reaching a different PudData::Parse
+#                   branch without crashing it.
+#   map100.pud,     complete, internally consistent 100-byte maps (also mayhem/test.sh fixtures).
+#   named100.pud
+# TYPE and every other section in these seeds has the length doc/pud-specs.txt gives it (TYPE is
+# 16 bytes, "WAR2 MAP\0" + a 7-byte id tag, as in every in-tree map).
+# The non-crashing seeds are there so the server testsuite holds enough passing testcases
+# (>= 10) and baseline libFuzzer features (>= 100) for rlenv's functionality-collapse check to
+# measure a patch at all; before them it had 4 passing testcases and 71 features (QA #1131).
+# Every seed is exactly 100 bytes because the harness always parses a 100-byte buffer; a shorter
+# input leaves an uninitialised tail. Regenerate them with mayhem/gen_pud_inputs.py.
+testsuite:
+  - https://$MAYHEM_DOMAIN/$MAYHEM_PROJECT/$MAYHEM_TARGET/testsuite.tar
+  - file://mayhem/parse/testsuite

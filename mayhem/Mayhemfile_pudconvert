@@ -1,0 +1,36 @@
+# Raw file-input CLI target: `pudconvert <infile> [<outdir>]` reads a .pud map and converts it
+# to Stratagus .smp/.sms Lua script files via PudToStratagus() (pud.cpp). Ported from the retired
+# mayhemheroes/wargus integration (same target name `pudconvert`, which ran bare `/pudconvert @@`
+# with no explicit outdir).
+#
+# Content vs. extension dispatch (verified locally on the seed below, not guessed): pudconvert.cpp
+# main() only uses a ".pud" suffix to COSMETICALLY strip the output basename (`strstr(newname,
+# ".pud")`); the actual parse — PudData::Parse() checking the "TYPE"/"WAR2 MAP" magic — runs
+# unconditionally regardless of the input's name/extension. Confirmed by compiling pudconvert
+# locally and feeding it the SAME seed bytes once as `x.pud` and once as extensionless `x`: both
+# produced byte-identical .smp/.sms output. So no `filepath:` is needed here to steer parsing.
+#
+# Explicit outdir IS required, though: pudconvert WRITES its .smp.gz/.sms.gz output next to the
+# input file (dirname(infile)) when no outdir arg is given. Mayhem's image root is read-only
+# during coverage collection, so an implicit outdir under wherever @@ resolves fails every write
+# (gzopen() returns NULL -> pudconvert returns -1 having done nothing) -> 0 edges through the real
+# conversion logic (WriteSMP/WriteSMS) while build and fuzz-smoke still pass. Verified locally:
+# pointing outdir at a read-only directory makes pudconvert silently no-op past the parse; pointing
+# it at /tmp (writable, scratch-only, never under /mayhem) converts correctly.
+project: savantenvs/wargus
+target: pudconvert
+
+cmds:
+  - cmd: /mayhem/pudconvert @@ /tmp
+    # Run #1: "Your target did not terminate within the default timeout (2 seconds)" — 0 edges, the
+    # run never got past sanity. The sibling `parse` target is libFuzzer-driven and unaffected; this
+    # one execs the real pudconvert binary per input, which needs a realistic budget under ASan.
+    timeout: 20
+
+# Canonical two-entry form: server-accumulated corpus + the per-target local seeds (the repo's one
+# shipped .pud map, maps/skirmish/multiplayer/(8)farscape2006.pud, and twokeeps.pud, a 464-byte
+# two-player map built by mayhem/gen_pud_inputs.py — both also fixtures that mayhem/test.sh's
+# behavioral oracle asserts known output values against).
+testsuite:
+  - https://$MAYHEM_DOMAIN/$MAYHEM_PROJECT/$MAYHEM_TARGET/testsuite.tar
+  - file://mayhem/pudconvert/testsuite
